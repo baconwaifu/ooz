@@ -34,9 +34,24 @@ static inline uint32_t _rotl(uint32_t x, int n) {
 #include <xmmintrin.h>
 #endif
 
+// Windows has this enabled implicitly, gcc requires passing an additional flag, so check for that.
+#ifdef __AVX__
+#include <xmmintrin.h>
+#endif
+
+// GCC doesn't support 'pragma warning' and in response prints a warning.
+#ifdef _MSC_VER
 #pragma warning (disable: 4244)
 #pragma warning (disable: 4530) // c++ exception handler used without unwind semantics
 #pragma warning (disable: 4018) // signed/unsigned mismatch
+#endif
+
+// Get GCC to stop complaining about unused parameters in stub functions.
+#ifdef __GNUC__
+#define UNUSED __attribute__((unused))
+#else
+#define UNUSED
+#endif
 
 // TODO: reference additional headers your program requires here
 typedef uint8_t byte;

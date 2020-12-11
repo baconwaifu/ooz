@@ -17,6 +17,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
 #include "stdafx.h"
+
 #include <sys/stat.h>
 
 // Header in front of each 256k block
@@ -440,6 +441,7 @@ int Log2RoundUp(uint32 v) {
 
 #define ALIGN_16(x) (((x)+15)&~15)
 #define COPY_64(d, s) {*(uint64*)(d) = *(uint64*)(s); }
+#ifdef __AVX__
 #define COPY_64_BYTES(d, s) {                                                 \
         _mm_storeu_si128((__m128i*)d + 0, _mm_loadu_si128((__m128i*)s + 0));  \
         _mm_storeu_si128((__m128i*)d + 1, _mm_loadu_si128((__m128i*)s + 1));  \
@@ -448,6 +450,34 @@ int Log2RoundUp(uint32 v) {
 }
 
 #define COPY_64_ADD(d, s, t) _mm_storel_epi64((__m128i *)(d), _mm_add_epi8(_mm_loadl_epi64((__m128i *)(s)), _mm_loadl_epi64((__m128i *)(t))))
+#else //__AVX__
+// No AVX intrinsics available; fall back to generic "C virtual machine" implementations
+#define COPY_64_BYTES(d, s) { \
+        memcpy((d), (s), 64);     \
+}
+
+
+/*
+ * unrolled for performance (still slow), but effectively the following:
+ * for (int i = 0; i < 8; i++) {
+ *     *((char*)(d) + i) = *((char*)(s) + i) + *((char*)(t) + i);
+ * } 
+ * NOTE: the assignment at the top is deliberate; means arguments are only evaluated once, so 'd++' can work properly.
+ */
+#define COPY_64_ADD(d, s, t) do { \
+        char* _dst = (char*)(d); \
+        char* _src = (char*)(s); \
+        char* _add = (char*)(t); \
+        *(_dst + 0) = (*(_src + 0)) + (*(_add + 0)); \
+        *(_dst + 1) = (*(_src + 1)) + (*(_add + 1)); \
+        *(_dst + 2) = (*(_src + 2)) + (*(_add + 2)); \
+        *(_dst + 3) = (*(_src + 3)) + (*(_add + 3)); \
+        *(_dst + 4) = (*(_src + 4)) + (*(_add + 4)); \
+        *(_dst + 5) = (*(_src + 5)) + (*(_add + 5)); \
+        *(_dst + 6) = (*(_src + 6)) + (*(_add + 6)); \
+        *(_dst + 7) = (*(_src + 7)) + (*(_add + 7)); \
+} while(0)
+#endif //__AVX__
 
 KrakenDecoder *Kraken_Create() {
   size_t scratch_size = 0x6C000;
@@ -565,7 +595,8 @@ const byte *LZNA_ParseQuantumHeader(KrakenQuantumHeader *hdr, const byte *p, boo
 }
 
 
-uint32 Kraken_GetCrc(const byte *p, size_t p_size) {
+
+uint32 Kraken_GetCrc(UNUSED const byte *p, UNUSED size_t p_size) {
   // TODO: implement
   return 0;
 }
@@ -1075,7 +1106,7 @@ int Huff_ReadCodeLengthsNew(BitReader *bits, uint8 *syms, uint32 *code_prefix) {
 
   if (1) {
     uint running_sum = 0x1e;
-    int maxlen = 11;
+    UNUSED int maxlen = 11;
     for (int i = 0; i < num_symbols; i++) {
       int v = code_len[i];
       v = -(int)(v & 1) ^ (v >> 1);
@@ -1094,7 +1125,7 @@ int Huff_ReadCodeLengthsNew(BitReader *bits, uint8 *syms, uint32 *code_prefix) {
     __m128i avg = _mm_set1_epi8(0x1e);
     __m128i ones = _mm_set1_epi8(1);
     __m128i max_codeword_len = _mm_set1_epi8(10);
-    for (uint i = 0; i < num_symbols; i += 16) {
+    for (int i = 0; i < num_symbols; i += 16) {
       __m128i v = _mm_loadu_si128((__m128i*)&code_len[i]), t;
       // avg[0..15] = avg[15]
       avg = _mm_unpackhi_epi8(avg, avg);
@@ -1509,8 +1540,8 @@ int Kraken_DecodeMultiArray(const uint8 *src, const uint8 *src_end,
   if (indi != num_indexes || leni != num_lens)
     return -1;
 
-  for (int i = 0; i < num_arrays_in_file; i++) {
-    if (entropy_array_size[i])
+  for (int ii = 0; ii < num_arrays_in_file; ii++) {
+    if (entropy_array_size[ii])
       return -1;
   }
   return src_end_actual - src_org;
@@ -1691,7 +1722,7 @@ bool Tans_DecodeTable(BitReader *bits, int L_bits, TansData *tans_data) {
     uint32 L = 1 << L_bits;
     uint8 *cur_rice_ptr = rice;
     int average = 6;
-    int somesum = 0;
+    uint somesum = 0;
     uint8 *tanstable_A = tans_data->A;
     uint32 *tanstable_B = tans_data->B;
 
@@ -1777,7 +1808,7 @@ bool Tans_DecodeTable(BitReader *bits, int L_bits, TansData *tans_data) {
     if (seen[sym])
       return false;
 
-    if (L - total_weights < weight || L - total_weights <= 1)
+    if ((int)(L - total_weights) < weight || (int)(L - total_weights) <= 1)
       return false;
 
     *tanstable_B++ = (sym << 16) + (L - total_weights);
@@ -1829,7 +1860,7 @@ void Tans_InitLut(TansData *tans_data, int L_bits, TansLutEnt *lut) {
 
   // Setup the entrys with weight >= 2
   int weights_sum = 0;
-  for (int i = 0; i < tans_data->B_used; i++) {
+  for (uint i = 0; i < tans_data->B_used; i++) {
     int weight = tans_data->B[i] & 0xffff;
     int symbol = tans_data->B[i] >> 16;
     if (weight > 4) {
@@ -2122,7 +2153,7 @@ int Kraken_GetBlockSize(const uint8 *src, const uint8 *src_end, int *dest_size, 
 
 int Kraken_DecodeBytes(byte **output, const byte *src, const byte *src_end, int *decoded_size, size_t output_size, bool force_memmove, uint8 *scratch, uint8 *scratch_end) {
   const byte *src_org = src;
-  int src_size, dst_size;
+  ssize_t src_size, dst_size;
 
   if (src_end - src < 2)
     return -1; // too few bytes
@@ -2218,7 +2249,7 @@ bool Kraken_UnpackOffsets(const byte *src, const byte *src_end,
                           int multi_dist_scale,
                           const byte *packed_litlen_stream, int packed_litlen_stream_size,
                           int *offs_stream, int *len_stream,
-                          bool excess_flag, int excess_bytes) {
+                          bool excess_flag, UNUSED int excess_bytes) {
 
 
   BitReader bits_a, bits_b;
@@ -2885,7 +2916,11 @@ bool Leviathan_ReadLzTable(int chunk_type,
                               lztable->offs_stream, lztable->len_stream, 0, 0);
 }
 
+#ifdef __GNUC__
+#define finline __attribute((always_inline))
+#else
 #define finline __forceinline
+#endif
 
 struct LeviathanModeRaw {
   const uint8 *lit_stream;
@@ -4212,7 +4247,11 @@ int ParseCmdLine(int argc, char *argv[]) {
         arg_direction = 't';
         continue;
       } else if (!strcmp(s, "dll")) {
+        #ifdef ENABLE_USE_DLL
         arg_dll = true;
+        #else
+        return -1; // Invalid argument if we're not compiled to load it
+        #endif
         continue;
       } else if (!strcmp(s, "kraken")) s = "mk";
       else if (!strcmp(s, "mermaid")) s = "mm";
@@ -4287,6 +4326,7 @@ bool Verify(const char *filename, uint8 *output, int outbytes, const char *curfi
   return true;
 }
 
+// Only Windows supports these directly, so short-circuit them if not.
 #ifndef _MSC_VER
 typedef uint64_t LARGE_INTEGER;
 void QueryPerformanceCounter(LARGE_INTEGER *a) {
@@ -4295,6 +4335,13 @@ void QueryPerformanceCounter(LARGE_INTEGER *a) {
 void QueryPerformanceFrequency(LARGE_INTEGER *a) {
   *a = 1;
 }
+#endif
+
+// If loading the proprietary dll is enabled
+#ifdef ENABLE_USE_DLL
+
+// Define these in case we're running under a wine-enabled or mingw GCC.
+#ifndef _MSC_VER
 #define WINAPI
 typedef void* HINSTANCE;
 HINSTANCE LoadLibraryA(const char *s) { return 0; }
@@ -4334,6 +4381,10 @@ void LoadLib() {
     error("error loading", LIBNAME);
 }
 
+#else
+// Stub to avoid linker errors.
+void LoadLib() {}
+#endif //ENABLE_USE_DLL
 struct CompressOptions;
 struct LRMCascade;
 
@@ -4357,7 +4408,9 @@ int main(int argc, char *argv[]) {
       " -z --compress            compress\n"
       " -b                       just benchmark, don't overwrite anything\n"
       " -f                       force overwrite existing file\n"
+      #ifdef ENABLE_USE_DLL
       " --dll                    decompress with the dll\n"
+      #endif
       " --verify                 decompress and verify that it matches output\n"
       " --verify=<folder>        verify with files in this folder\n"
       " -<1-9> --level=<-4..10>  compression level\n"
@@ -4397,7 +4450,9 @@ int main(int argc, char *argv[]) {
       *(uint64*)output = input_size;
       QueryPerformanceCounter((LARGE_INTEGER*)&start);
       if (arg_dll) {
+        #ifdef ENABLE_USE_DLL // This path will never be hit if this isn't true; this is to avoid link errors.
         outbytes = OodLZ_Compress(arg_compressor, input, input_size, output + 8, arg_level, 0, 0, 0, 0, 0);
+        #endif
       } else {
         outbytes = CompressBlock(arg_compressor, input, output + 8, input_size, arg_level, 0, 0, 0);
       }
@@ -4425,7 +4480,9 @@ int main(int argc, char *argv[]) {
       QueryPerformanceCounter((LARGE_INTEGER*)&start);
 
       if (arg_dll) {
+        #ifdef ENABLE_USE_DLL // Same here; just to stop the linker from breaking.
         outbytes = OodLZ_Decompress(input + hdrsize, input_size - hdrsize, output, unpacked_size, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        #endif
       } else {
         outbytes = Kraken_Decompress(input + hdrsize, input_size - hdrsize, output, unpacked_size);
       }
