@@ -6,7 +6,9 @@
 #include <vector>
 #include "qsort.h"
 
+#ifdef _MSC_VER
 #pragma warning (disable: 4018)
+#endif
 
 float CombineCostComponents(int platforms, float a, float b, float c, float d) {
   if ((platforms & 0xf) == 0)
