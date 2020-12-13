@@ -26,7 +26,7 @@ set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS
   "Debug" "Release" "RelWithDebInfo" "MinSizeRel")
   
 include(AddCXXCompilerFlags)
-add_cxx_compiler_flags(-pedantic -pedantic-errors -Wall -Wextra -Wshadow -Wstrict-aliasing -Wno-misleading-indentation "-ftemplate-depth=1024")
+add_cxx_compiler_flags(-pedantic -fno-permissive -pedantic-errors -Wall -Wextra -Wshadow -Wstrict-aliasing -Wno-misleading-indentation "-ftemplate-depth=1024")
 option(OODLE_FAIL_ON_WARNING "Cause compilation to fail if a warning is generated" OFF)
 if(OODLE_FAIL_ON_WARNING)
   add_cxx_compiler_flags(-Werror)
@@ -35,6 +35,7 @@ endif()
 option(OODLE_ENABLE_AVX2 "Enable AVX Vector Extensions" ON)
 if(OODLE_ENABLE_AVX2)
   add_cxx_compiler_flags(-mavx -mavx2)
+  add_compile_definitions(OODLE_ENABLE_AVX2)
 endif()
 
 # The following goes against the principle of the GPLv3
@@ -42,6 +43,11 @@ endif()
 option(OODLE_ENABLE_DLL "Enable loading of proprietary Oodle DLL" OFF)
 if(OODLE_ENABLE_DLL)
   add_compile_definitions(ENABLE_USE_DLL)
+endif()
+
+option(OODLE_COMPILE_SANITIZE "Compile with undefined behavior sanitization enabled")
+if(OODLE_COMPILE_SANITIZE)
+  add_cxx_compiler_flags(-fsanitize=undefined)
 endif()
 
 #set(CMAKE_INSTALL_RPATH_USE_LINK_PATH true)
@@ -78,9 +84,25 @@ set(OODLE_SOURCES
   compr_mermaid.cpp
   compr_multiarray.cpp
   compr_tans.cpp
-  kraken.cpp
+  compress.cpp
   lzna.cpp
+  kraken_impl.cpp
+  mermaid_impl.cpp
+  leviathan_impl.cpp
+  lzna_impl.cpp
+  bitreader.cpp
+  util.cpp
 )
 
-add_library(oodle SHARED ${OODLE_SOURCES})
-install(TARGETS oodle EXPORT liboodle DESTINATION lib)
+# Note: the executable and the library are built from the same sources; the only difference is linking data vs executable entry point.
+# Build both shared and static copies of the shared library.
+add_library(liboodle_o OBJECT ${OODLE_SOURCES})
+# Yes, this actually needs to be specified manually. CMake doesn't do a reverse-dependency heuristic for some reason.
+set_property(TARGET liboodle_o PROPERTY POSITION_INDEPENDENT_CODE 1)
+add_library(oodle SHARED $<TARGET_OBJECTS:liboodle_o>)
+add_library(oodle_static STATIC $<TARGET_OBJECTS:liboodle_o>)
+# Executable needs the main kraken.cpp, as that's what has main()
+add_executable(ooz $<TARGET_OBJECTS:liboodle_o> kraken.cpp)
+
+install(TARGETS oodle oodle_static DESTINATION lib)
+install(TARGETS ooz DESTINATION bin)
