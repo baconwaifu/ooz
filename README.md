@@ -51,11 +51,11 @@ between the two is the C-equivalent to 'calling another executable and getting a
 program is capable of operating on it's own without the DLL, and the DLL without the program.
 
 ## Roadmap
-[x] Compile as shared library
-[] Compile main executable on Linux
-[] Working `main()` on Linux
-[] Add fallback implementation for AVX intrinsics for non-x86 targets
-[] Hardening and Fuzzing (needs clang support?)
-[] Add Validation test cases (Compress and decompress samples)
-[] Make library present same interface as oo2core
-[] Add dll spec, and add dll target to VS build
+- [x] Compile as shared library
+- [ ] Compile main executable on Linux
+- [ ] Working `main()` on Linux
+- [ ] Add fallback implementation for AVX intrinsics for non-x86 targets
+- [ ] Hardening and Fuzzing (needs clang support?)
+- [ ] Add Validation test cases (Compress and decompress samples)
+- [ ] Make library present same interface as oo2core
+- [ ] Add dll spec, and add dll target to VS build
